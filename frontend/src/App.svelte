@@ -499,7 +499,7 @@
           </div>
 
           <!-- right: settings + convert button (only show when a file is picked and analysed) -->
-          {#if phase !== 'idle' && !analysing}
+          {#if phase !== 'idle' && !analysing && engineState === 'ready' && profiles.length > 0}
             <div class="right-col">
               <Settings
                 {profiles}
