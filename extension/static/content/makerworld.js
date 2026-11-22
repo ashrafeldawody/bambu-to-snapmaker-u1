@@ -132,13 +132,14 @@
     const id = modelId();
     if (!id || busy) return;
     busy = true;
-    toast.show('busy', 'Preparing for Snapmaker U1', 'Fetching the print profile…');
+    setButtonState('busy', 'Fetching print profile…');
     try {
       const instance = await resolveInstance(id);
       const file = await requestFile(instance);
-      toast.show('busy', 'Preparing for Snapmaker U1', `Downloading ${file.name}…`);
+      setButtonState('busy', 'Downloading…');
       const result = await chrome.runtime.sendMessage({ type: 'convert-and-download', src: file.url, name: file.name });
       if (!result?.ok) throw new Error(result?.error || 'The conversion failed.');
+      setButtonState('busy', 'Saving…');
       await saveConvertedFile(result);
       const lines = [`${result.filename} · ${result.profile} profile`, ...result.warnings];
       toast.show('done', 'Downloaded for Snapmaker U1', lines, result.warnings.length ? 12000 : 6000);
@@ -146,13 +147,14 @@
       toast.show('error', 'Could not prepare the U1 file', err?.message || String(err), 10000);
     } finally {
       busy = false;
+      setButtonState('idle', LABEL);
     }
   }
 
   chrome.runtime.onMessage.addListener((message) => {
     if (message?.type !== 'u1-progress' || !busy) return;
-    const text = message.stage.startsWith('Downloading') ? `${message.stage}…` : 'Converting settings, G-code and filaments…';
-    toast.show('busy', 'Preparing for Snapmaker U1', text);
+    const downloading = message.stage.startsWith('Downloading');
+    setButtonState('busy', downloading ? `${message.stage}…` : 'Converting for U1…');
   });
 
   function warmEngine() {
@@ -212,7 +214,48 @@
     warmEngine();
   }
 
+  const BUTTON_ATTR = 'data-u1c-button';
+  const DOWNLOAD_ICON = '<svg width="16" height="16" viewBox="0 0 24 24" fill="none" aria-hidden="true"><path d="M12 4v11m0 0l-4.5-4.5M12 15l4.5-4.5M5 19h14" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"/></svg>';
+
+  function buttonStack(primary) {
+    let node = primary;
+    for (let i = 0; i < 7 && node; i++) {
+      node = node.parentElement;
+      if (node && getComputedStyle(node).flexDirection === 'column') return node;
+    }
+    return null;
+  }
+
+  function setButtonState(state, text) {
+    for (const button of document.querySelectorAll(`[${BUTTON_ATTR}]`)) {
+      button.dataset.state = state;
+      button.disabled = state === 'busy';
+      button.querySelector('.u1c-btn-label').textContent = text;
+    }
+  }
+
+  function addPageButton() {
+    if (!modelId()) return;
+    for (const primary of document.querySelectorAll('span.primaryButton')) {
+      const split = primary.parentElement;
+      if (!split || !split.querySelector('.icon-box')) continue;
+      const stack = buttonStack(primary);
+      if (!stack || stack.querySelector(`[${BUTTON_ATTR}]`)) continue;
+      const button = document.createElement('button');
+      button.type = 'button';
+      button.className = 'u1c-btn';
+      button.setAttribute(BUTTON_ATTR, '');
+      button.dataset.state = busy ? 'busy' : 'idle';
+      button.disabled = busy;
+      button.innerHTML = `<span class="u1c-btn-icon">${DOWNLOAD_ICON}</span><span class="u1c-btn-label">${busy ? 'Preparing…' : LABEL}</span>`;
+      button.addEventListener('click', () => run());
+      button.addEventListener('mouseenter', warmEngine, { once: true });
+      stack.append(button);
+    }
+  }
+
   function scan() {
+    addPageButton();
     for (const menu of document.querySelectorAll('[role="tooltip"], [role="menu"]')) {
       if (MENU_HINT.test(menu.textContent || '')) enhanceMenu(menu);
     }

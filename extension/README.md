@@ -8,13 +8,15 @@ never leave your computer.
 
 ## What it does
 
-- **On MakerWorld:** the green download button's dropdown (next to
-  *Open in Bambu Studio*, *Download 3MF* and *Download STL/CAD Files*) gets a
-  **Download for Snapmaker U1** item. Click it and the selected print
-  profile downloads and converts in the background. Chrome then saves
+- **On MakerWorld:** a green-outlined **Download for Snapmaker U1** button sits
+  directly under MakerWorld's own download button, both in the desktop
+  layout and in the mobile sticky bar. The same action is also in that
+  button's dropdown, next to *Download 3MF* and *Download STL/CAD Files*.
+  Click it and the selected print profile downloads and converts in the
+  background, with progress shown on the button. Chrome then saves
   `<model>-U1.3mf` like any other download, without opening a tab. A small
-  notice shows progress, the U1 profile that was used, and anything to check
-  in Snapmaker Orca (multi-plate, more than 4 painted colours, oversize bed).
+  notice then shows the U1 profile used and anything to check in Snapmaker
+  Orca (multi-plate, more than 4 painted colours, oversized bed).
 - **Toolbar icon:** opens the full converter (the hosted site's UI) for
   advanced settings or for converting any local `.3mf`.
 
