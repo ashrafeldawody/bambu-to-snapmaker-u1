@@ -8,19 +8,19 @@ never leave your computer.
 
 ## What it does
 
-- **On MakerWorld:** a **Convert for Snapmaker U1** button appears on every
-  model page. Click it and pick a print profile. The page's own preselected
-  profile is highlighted. The extension fetches that profile's 3MF with your
-  logged-in MakerWorld session and opens it in the converter tab.
-- **Anywhere:** click the toolbar icon to open the converter and drop in
-  any `.3mf` file.
-- The converter tab is the same UI as the hosted site, with profile
-  auto-match, filament rules, toolhead assignment, swap pauses and the
-  change report. The converted file downloads straight from the tab.
+- **On MakerWorld:** the green download button's dropdown (next to
+  *Open in Bambu Studio*, *Download 3MF* and *Download STL/CAD Files*) gets a
+  **Download for Snapmaker U1** item. Click it and the selected print
+  profile downloads and converts in the background. Chrome then saves
+  `<model>-U1.3mf` like any other download, without opening a tab. A small
+  notice shows progress, the U1 profile that was used, and anything to check
+  in Snapmaker Orca (multi-plate, more than 4 painted colours, oversize bed).
+- **Toolbar icon:** opens the full converter (the hosted site's UI) for
+  advanced settings or for converting any local `.3mf`.
 
-You must be logged in to MakerWorld, because MakerWorld only serves 3MF
-downloads to signed-in users. If MakerWorld asks for a captcha, use its
-normal download dialog once, then click the button again.
+Conversion uses the same defaults as the website: auto-matched U1 profile,
+filament rules, speed clamping, and swap pauses for layer-based prints with
+more than 4 colours. You must be logged in to MakerWorld.
 
 ## Install from source
 
@@ -56,16 +56,18 @@ runs suggest-profile and a full conversion.
 | `extension/python/ijson` | Stub so the optional preset cleanup degrades gracefully (as it already does without the C backend) |
 | `extension/static/worker/py-worker.js` | Web worker that boots Pyodide, loads the converter and handles calls |
 | `frontend/src/lib/localEngine.ts` | Sends `api.ts` calls to the worker when built with `--mode extension` |
-| `frontend/src/lib/makerworldImport.ts` | Downloads the MakerWorld file handed over by the content script |
-| `extension/static/content/` | MakerWorld button and print-profile picker |
-| `extension/static/background.js` | Opens the converter tab |
+| `frontend/src/lib/makerworldImport.ts` | Lets the full converter open a file passed in by URL (`?src=`) |
+| `extension/static/content/` | Adds the menu item to MakerWorld's download dropdown and shows progress |
+| `extension/static/offscreen/` | Hidden page that downloads, converts and hands the file to Chrome's downloads |
+| `extension/static/background.js` | Runs the offscreen converter, saves downloads, opens the full converter |
 | `extension/build.mjs` | Assembles `dist/`: Pyodide runtime, wheels, Python sources, profiles, rules, UI |
 
 The MakerWorld endpoints the button uses
 (`/api/v1/design-service/design/{id}` and
 `/api/v1/design-service/instance/{id}/f3mf?type=download`) are not
-official and may change. If the automatic download fails, the converter tab
-offers a manual download link and the drop zone still works.
+official and may change. If the automatic download fails, the notice
+shows the reason, and the regular Download 3MF plus the toolbar converter
+still work.
 
 ## License
 

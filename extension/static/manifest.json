@@ -3,7 +3,7 @@
   "name": "MakerWorld to Snapmaker U1 Converter",
   "short_name": "U1 Converter",
   "version": "1.0.0",
-  "description": "Convert MakerWorld and Bambu Studio 3MF projects for the Snapmaker U1, offline in your browser.",
+  "description": "Adds \"Download for Snapmaker U1\" to MakerWorld. Converts Bambu 3MF projects for the Snapmaker U1, offline in your browser.",
   "icons": {
     "16": "icons/icon-16.png",
     "32": "icons/icon-32.png",
@@ -21,7 +21,10 @@
     "service_worker": "background.js",
     "type": "module"
   },
-  "permissions": [],
+  "permissions": [
+    "offscreen",
+    "downloads"
+  ],
   "host_permissions": [
     "https://makerworld.com/*",
     "https://*.makerworld.com/*",
@@ -39,8 +42,12 @@
         "https://makerworld.com/*",
         "https://makerworld.com.cn/*"
       ],
-      "js": ["content/makerworld.js"],
-      "css": ["content/makerworld.css"],
+      "js": [
+        "content/makerworld.js"
+      ],
+      "css": [
+        "content/makerworld.css"
+      ],
       "run_at": "document_idle"
     }
   ],

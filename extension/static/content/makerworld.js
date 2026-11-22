@@ -1,233 +1,189 @@
 (() => {
-  const ROOT_ID = 'u1c-root';
+  const ITEM_ATTR = 'data-u1c-item';
   const MODEL_PATH = /\/models\/(\d+)/;
   const PROFILE_HASH = /profileId-(\d+)/;
-  let renderedFor = '';
-  let designCache = new Map();
+  const MENU_HINT = /3MF|STL|Bambu Studio/i;
+  const LABEL = 'Download for Snapmaker U1';
+  const API_HEADERS = {
+    Accept: 'application/json, text/plain, */*',
+    'x-bbl-client-type': 'web',
+    'x-bbl-client-name': 'MakerWorld',
+    'x-bbl-app-source': 'makerworld',
+    'x-bbl-client-version': '00.00.00.01',
+  };
 
-  function currentModelId() {
+  let busy = false;
+  let warmed = false;
+
+  function modelId() {
     const match = location.pathname.match(MODEL_PATH);
     return match ? match[1] : null;
   }
 
-  function currentProfileId() {
-    const match = location.hash.match(PROFILE_HASH) || location.search.match(PROFILE_HASH);
-    return match ? match[1] : null;
-  }
-
-  function readCookie(name) {
-    const prefix = `${name}=`;
-    for (const part of document.cookie.split(';')) {
-      const trimmed = part.trim();
-      if (trimmed.startsWith(prefix)) return decodeURIComponent(trimmed.slice(prefix.length));
-    }
-    return null;
-  }
-
-  function apiHeaders() {
-    const headers = { Accept: 'application/json' };
-    const token = readCookie('token');
-    if (token) headers.Authorization = `Bearer ${token}`;
-    return headers;
-  }
-
-  function designFromNextData(modelId) {
-    const script = document.getElementById('__NEXT_DATA__');
-    if (!script) return null;
-    try {
-      const design = JSON.parse(script.textContent)?.props?.pageProps?.design;
-      return design && String(design.id) === modelId ? design : null;
-    } catch {
-      return null;
-    }
-  }
-
-  function unwrapDesign(payload) {
-    if (!payload || typeof payload !== 'object') return null;
-    if (Array.isArray(payload.instances)) return payload;
-    for (const key of ['design', 'data', 'result']) {
-      if (payload[key] && Array.isArray(payload[key].instances)) return payload[key];
-    }
-    return null;
-  }
-
-  async function loadDesign(modelId) {
-    if (designCache.has(modelId)) return designCache.get(modelId);
-    let design = designFromNextData(modelId);
-    if (!design) {
-      const response = await fetch(`/api/v1/design-service/design/${modelId}`, {
-        credentials: 'include',
-        headers: apiHeaders(),
-      });
-      if (!response.ok) throw new Error(`MakerWorld returned ${response.status} while reading the model`);
-      design = unwrapDesign(await response.json());
-    }
-    if (!design || !Array.isArray(design.instances) || design.instances.length === 0) {
-      throw new Error('No downloadable print profiles were found for this model');
-    }
-    designCache.set(modelId, design);
-    return design;
-  }
-
-  function pickInstance(design, profileId) {
-    const instances = design.instances;
-    if (profileId) {
-      const hit = instances.find((i) => String(i.profileId) === profileId)
-        || instances.find((i) => String(i.id) === profileId);
-      if (hit) return hit;
-    }
-    return instances.find((i) => i.isDefault) || instances[0];
-  }
-
-  function fileNameFor(design, instance, suggested) {
-    if (suggested && /\.3mf$/i.test(suggested)) return suggested;
-    const base = [design.title, instance.title].filter(Boolean).join(' - ') || `makerworld-${instance.id}`;
-    return `${base.replace(/[\\/:*?"<>|\x00-\x1f]+/g, '_').slice(0, 120)}.3mf`;
-  }
-
-  async function requestDownload(instance) {
-    const response = await fetch(`/api/v1/design-service/instance/${instance.id}/f3mf?type=download`, {
-      credentials: 'include',
-      headers: apiHeaders(),
-    });
-    if (response.status === 401) throw new Error('Log in to MakerWorld first, then try again');
+  async function api(path) {
+    const response = await fetch(path, { credentials: 'include', headers: API_HEADERS });
+    if (response.status === 401) throw new Error('Log in to MakerWorld to download this model.');
     if (response.status === 403 || response.status === 418) {
-      throw new Error('MakerWorld blocked the download. Open the normal download dialog once (it may ask for a captcha), then try again');
+      throw new Error('MakerWorld wants a verification. Use Download 3MF once, then try again.');
     }
-    if (!response.ok) throw new Error(`MakerWorld returned ${response.status} for the download`);
-    const contentType = response.headers.get('content-type') || '';
-    if (!contentType.includes('json')) {
-      return { url: response.url, name: null };
+    if (!response.ok) throw new Error(`MakerWorld returned ${response.status}.`);
+    return response.json();
+  }
+
+  async function resolveInstance(id) {
+    const fromHash = (location.hash.match(PROFILE_HASH) || location.search.match(PROFILE_HASH) || [])[1];
+    const design = await api(`/api/v1/design-service/design/${id}`);
+    const instances = Array.isArray(design?.instances) ? design.instances : [];
+    const chosen = (fromHash && instances.find((i) => String(i.id) === fromHash))
+      || (fromHash && instances.find((i) => String(i.profileId) === fromHash))
+      || instances.find((i) => i.id === design?.defaultInstanceId)
+      || instances.find((i) => i.isDefault)
+      || instances[0];
+    if (!chosen && fromHash) return { id: fromHash, title: '', designTitle: design?.title || '' };
+    if (!chosen) throw new Error('This model has no downloadable print profile.');
+    return { id: chosen.id, title: chosen.title || '', designTitle: design?.title || '' };
+  }
+
+  async function requestFile(instance) {
+    const payload = await api(`/api/v1/design-service/instance/${instance.id}/f3mf?type=download&fileType=`);
+    if (!payload?.url) throw new Error(payload?.message || 'MakerWorld did not return a download link.');
+    const fallback = `${instance.designTitle || 'makerworld-model'}.3mf`;
+    return { url: payload.url, name: payload.name || fallback };
+  }
+
+  const toast = (() => {
+    let node = null;
+    let hideTimer = null;
+
+    function ensure() {
+      if (node && document.body.contains(node)) return node;
+      node = document.createElement('div');
+      node.className = 'u1c-toast';
+      node.setAttribute('role', 'status');
+      node.setAttribute('aria-live', 'polite');
+      node.innerHTML = '<span class="u1c-toast-icon"></span><div class="u1c-toast-body"><div class="u1c-toast-title"></div><div class="u1c-toast-text"></div></div><button type="button" class="u1c-toast-close" aria-label="Close">×</button>';
+      node.querySelector('.u1c-toast-close').addEventListener('click', () => hide());
+      document.body.append(node);
+      return node;
     }
-    const payload = await response.json();
-    const body = payload?.data && typeof payload.data === 'object' ? payload.data : payload;
-    const url = body?.url || body?.downloadUrl || body?.fileUrl;
-    if (!url) throw new Error(payload?.message || payload?.error || 'MakerWorld did not return a download link');
-    return { url, name: body?.name || body?.fileName || null };
-  }
 
-  function element(tag, props = {}, children = []) {
-    const node = document.createElement(tag);
-    for (const [key, value] of Object.entries(props)) {
-      if (key === 'class') node.className = value;
-      else if (key === 'text') node.textContent = value;
-      else if (key.startsWith('on')) node.addEventListener(key.slice(2), value);
-      else node.setAttribute(key, value);
-    }
-    for (const child of children) node.append(child);
-    return node;
-  }
-
-  function setStatus(root, message, kind = 'info') {
-    const status = root.querySelector('.u1c-status');
-    status.textContent = message || '';
-    status.dataset.kind = kind;
-    status.hidden = !message;
-  }
-
-  async function convertInstance(root, design, instance) {
-    const button = root.querySelector('.u1c-main');
-    button.disabled = true;
-    setStatus(root, `Preparing "${instance.title || 'print profile'}"…`);
-    try {
-      const { url, name } = await requestDownload(instance);
-      const reply = await chrome.runtime.sendMessage({
-        type: 'open-converter',
-        src: url,
-        name: fileNameFor(design, instance, name),
-        page: location.href,
-      });
-      if (!reply?.ok) throw new Error(reply?.error || 'Could not open the converter');
-      setStatus(root, 'Opened in the U1 Converter tab.', 'ok');
-      closePanel(root);
-    } catch (err) {
-      setStatus(root, err?.message || String(err), 'error');
-    } finally {
-      button.disabled = false;
-    }
-  }
-
-  function closePanel(root) {
-    const panel = root.querySelector('.u1c-panel');
-    if (panel) panel.remove();
-  }
-
-  function showPanel(root, design) {
-    closePanel(root);
-    const selected = pickInstance(design, currentProfileId());
-    const list = element('div', { class: 'u1c-list' });
-    for (const instance of design.instances) {
-      const meta = [];
-      if (instance.isDefault) meta.push('default');
-      if (instance === selected) meta.push('selected on page');
-      list.append(element('button', {
-        class: `u1c-item${instance === selected ? ' u1c-current' : ''}`,
-        type: 'button',
-        onclick: () => convertInstance(root, design, instance),
-      }, [
-        element('span', { class: 'u1c-item-title', text: instance.title || `Profile ${instance.id}` }),
-        element('span', { class: 'u1c-item-meta', text: meta.join(' · ') }),
-      ]));
-    }
-    const panel = element('div', { class: 'u1c-panel', role: 'dialog', 'aria-label': 'Choose a print profile' }, [
-      element('div', { class: 'u1c-panel-head' }, [
-        element('span', { text: 'Choose a print profile to convert' }),
-        element('button', { class: 'u1c-close', type: 'button', 'aria-label': 'Close', text: '×', onclick: () => closePanel(root) }),
-      ]),
-      list,
-    ]);
-    root.prepend(panel);
-  }
-
-  async function onMainClick(root) {
-    const modelId = currentModelId();
-    if (!modelId) return;
-    setStatus(root, 'Reading print profiles…');
-    try {
-      const design = await loadDesign(modelId);
-      setStatus(root, '');
-      if (design.instances.length === 1) {
-        await convertInstance(root, design, design.instances[0]);
-      } else {
-        showPanel(root, design);
+    function show(kind, title, text = '', autoHideMs = 0) {
+      const el = ensure();
+      clearTimeout(hideTimer);
+      el.dataset.kind = kind;
+      el.querySelector('.u1c-toast-title').textContent = title;
+      const body = el.querySelector('.u1c-toast-text');
+      body.textContent = '';
+      for (const line of [].concat(text).filter(Boolean)) {
+        const row = document.createElement('div');
+        row.textContent = line;
+        body.append(row);
       }
+      requestAnimationFrame(() => el.classList.add('u1c-show'));
+      if (autoHideMs) hideTimer = setTimeout(hide, autoHideMs);
+    }
+
+    function hide() {
+      if (node) node.classList.remove('u1c-show');
+    }
+
+    return { show };
+  })();
+
+  function closeMenu() {
+    document.body.dispatchEvent(new MouseEvent('mousedown', { bubbles: true }));
+    document.body.click();
+  }
+
+  async function run() {
+    const id = modelId();
+    if (!id || busy) return;
+    busy = true;
+    toast.show('busy', 'Preparing for Snapmaker U1', 'Fetching the print profile…');
+    try {
+      const instance = await resolveInstance(id);
+      const file = await requestFile(instance);
+      toast.show('busy', 'Preparing for Snapmaker U1', `Downloading ${file.name}…`);
+      const result = await chrome.runtime.sendMessage({ type: 'convert-and-download', src: file.url, name: file.name });
+      if (!result?.ok) throw new Error(result?.error || 'The conversion failed.');
+      const lines = [`${result.filename} · ${result.profile} profile`, ...result.warnings];
+      toast.show('done', 'Downloaded for Snapmaker U1', lines, result.warnings.length ? 12000 : 6000);
     } catch (err) {
-      setStatus(root, err?.message || String(err), 'error');
+      toast.show('error', 'Could not prepare the U1 file', err?.message || String(err), 10000);
+    } finally {
+      busy = false;
     }
   }
 
-  function mount() {
-    const root = element('div', { id: ROOT_ID }, [
-      element('div', { class: 'u1c-status', hidden: '' }),
-    ]);
-    const button = element('button', { class: 'u1c-main', type: 'button', title: 'Convert this model for the Snapmaker U1' }, [
-      element('span', { class: 'u1c-logo', 'aria-hidden': 'true', text: 'U1' }),
-      element('span', { text: 'Convert for Snapmaker U1' }),
-    ]);
-    button.addEventListener('click', () => onMainClick(root));
-    root.append(button);
-    document.body.append(root);
-    return root;
-  }
-
-  function sync() {
-    const modelId = currentModelId();
-    const existing = document.getElementById(ROOT_ID);
-    if (!modelId) {
-      if (existing) existing.remove();
-      renderedFor = '';
-      return;
-    }
-    if (existing && renderedFor === modelId) return;
-    if (existing) existing.remove();
-    renderedFor = modelId;
-    mount();
-  }
-
-  sync();
-  setInterval(sync, 1000);
-  window.addEventListener('hashchange', () => {
-    const root = document.getElementById(ROOT_ID);
-    if (root) closePanel(root);
+  chrome.runtime.onMessage.addListener((message) => {
+    if (message?.type !== 'u1-progress' || !busy) return;
+    const text = message.stage.startsWith('Downloading') ? `${message.stage}…` : 'Converting settings, G-code and filaments…';
+    toast.show('busy', 'Preparing for Snapmaker U1', text);
   });
+
+  function warmEngine() {
+    if (warmed) return;
+    warmed = true;
+    chrome.runtime.sendMessage({ type: 'warm-engine' }).catch(() => { warmed = false; });
+  }
+
+  function menuItems(menu) {
+    return [...menu.querySelectorAll('*')].filter((el) => {
+      if (el.hasAttribute(ITEM_ATTR) || el.closest(`[${ITEM_ATTR}]`)) return false;
+      const text = el.textContent.trim();
+      return text.length < 40 && MENU_HINT.test(text);
+    });
+  }
+
+  function sharedItemClass(candidates) {
+    const counts = new Map();
+    for (const el of candidates) {
+      for (const cls of el.classList) {
+        if (cls.startsWith('u1c')) continue;
+        counts.set(cls, (counts.get(cls) || 0) + 1);
+      }
+    }
+    let best = null;
+    for (const [cls, count] of counts) {
+      if (count >= 2 && (!best || count > best[1])) best = [cls, count];
+    }
+    return best ? best[0] : null;
+  }
+
+  function enhanceMenu(menu) {
+    if (!modelId() || menu.querySelector(`[${ITEM_ATTR}]`)) return;
+    const candidates = menuItems(menu);
+    const itemClass = sharedItemClass(candidates);
+    if (!itemClass) return;
+    const siblings = candidates.filter((el) => el.classList.contains(itemClass));
+    const template = siblings.find((el) => el.children.length === 0) || siblings[0];
+    const anchor = siblings[siblings.length - 1];
+    const item = document.createElement(template.tagName);
+    item.className = itemClass;
+    item.setAttribute(ITEM_ATTR, '');
+    item.setAttribute('role', 'menuitem');
+    item.tabIndex = 0;
+    item.textContent = LABEL;
+    const activate = (event) => {
+      event.preventDefault();
+      event.stopPropagation();
+      setTimeout(closeMenu, 0);
+      run();
+    };
+    item.addEventListener('click', activate);
+    item.addEventListener('keydown', (event) => {
+      if (event.key === 'Enter' || event.key === ' ') activate(event);
+    });
+    anchor.after(item);
+    warmEngine();
+  }
+
+  function scan() {
+    for (const menu of document.querySelectorAll('[role="tooltip"], [role="menu"]')) {
+      if (MENU_HINT.test(menu.textContent || '')) enhanceMenu(menu);
+    }
+  }
+
+  new MutationObserver(scan).observe(document.documentElement, { childList: true, subtree: true });
+  scan();
 })();
