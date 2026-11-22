@@ -95,6 +95,39 @@
     document.body.click();
   }
 
+  const CHUNK_BYTES = 4 * 1024 * 1024;
+
+  function decodeBase64(text) {
+    const binary = atob(text);
+    const bytes = new Uint8Array(binary.length);
+    for (let i = 0; i < binary.length; i++) bytes[i] = binary.charCodeAt(i);
+    return bytes;
+  }
+
+  async function fetchConvertedBytes(jobId, size) {
+    const parts = [];
+    for (let offset = 0; offset < size; offset += CHUNK_BYTES) {
+      const reply = await chrome.runtime.sendMessage({ target: 'offscreen', type: 'chunk', jobId, offset, length: CHUNK_BYTES });
+      if (!reply?.ok) throw new Error(reply?.error || 'Could not read the converted file.');
+      parts.push(decodeBase64(reply.data));
+    }
+    chrome.runtime.sendMessage({ target: 'offscreen', type: 'release', jobId }).catch(() => {});
+    return parts;
+  }
+
+  async function saveConvertedFile(result) {
+    const parts = await fetchConvertedBytes(result.jobId, result.size);
+    const url = URL.createObjectURL(new Blob(parts, { type: 'application/octet-stream' }));
+    const link = document.createElement('a');
+    link.href = url;
+    link.download = result.filename;
+    link.style.display = 'none';
+    document.body.append(link);
+    link.click();
+    link.remove();
+    setTimeout(() => URL.revokeObjectURL(url), 60000);
+  }
+
   async function run() {
     const id = modelId();
     if (!id || busy) return;
@@ -106,6 +139,7 @@
       toast.show('busy', 'Preparing for Snapmaker U1', `Downloading ${file.name}…`);
       const result = await chrome.runtime.sendMessage({ type: 'convert-and-download', src: file.url, name: file.name });
       if (!result?.ok) throw new Error(result?.error || 'The conversion failed.');
+      await saveConvertedFile(result);
       const lines = [`${result.filename} · ${result.profile} profile`, ...result.warnings];
       toast.show('done', 'Downloaded for Snapmaker U1', lines, result.warnings.length ? 12000 : 6000);
     } catch (err) {

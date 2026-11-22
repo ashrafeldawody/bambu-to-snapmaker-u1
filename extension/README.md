@@ -58,8 +58,8 @@ runs suggest-profile and a full conversion.
 | `frontend/src/lib/localEngine.ts` | Sends `api.ts` calls to the worker when built with `--mode extension` |
 | `frontend/src/lib/makerworldImport.ts` | Lets the full converter open a file passed in by URL (`?src=`) |
 | `extension/static/content/` | Adds the menu item to MakerWorld's download dropdown and shows progress |
-| `extension/static/offscreen/` | Hidden page that downloads, converts and hands the file to Chrome's downloads |
-| `extension/static/background.js` | Runs the offscreen converter, saves downloads, opens the full converter |
+| `extension/static/offscreen/` | Hidden page that downloads and converts; the MakerWorld page then saves the result itself, so the filename is kept even when other extensions manage downloads |
+| `extension/static/background.js` | Starts the offscreen converter and opens the full converter |
 | `extension/build.mjs` | Assembles `dist/`: Pyodide runtime, wheels, Python sources, profiles, rules, UI |
 
 The MakerWorld endpoints the button uses

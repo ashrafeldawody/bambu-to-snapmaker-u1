@@ -12,8 +12,8 @@ async function ensureOffscreen() {
   if (!offscreenReady) {
     offscreenReady = chrome.offscreen.createDocument({
       url: OFFSCREEN_PAGE,
-      reasons: ['WORKERS', 'BLOBS'],
-      justification: 'Runs the 3MF converter engine and hands the converted file to the downloads API.',
+      reasons: ['WORKERS'],
+      justification: 'Runs the 3MF converter engine in a web worker.',
     }).finally(() => { offscreenReady = null; });
   }
   await offscreenReady;
@@ -32,11 +32,9 @@ function openConverter(params) {
   return chrome.tabs.create({ url: url.href });
 }
 
-async function convertAndDownload(message, tabId) {
+async function convertForTab(message, tabId) {
   const result = await toOffscreen({ type: 'convert', url: message.src, name: message.name, tabId });
-  if (!result?.ok) return result || { ok: false, error: 'The converter did not answer' };
-  await chrome.downloads.download({ url: result.blobUrl, filename: result.filename, conflictAction: 'uniquify' });
-  return { ok: true, filename: result.filename, profile: result.profile, warnings: result.warnings };
+  return result || { ok: false, error: 'The converter did not answer' };
 }
 
 chrome.action.onClicked.addListener(() => {
@@ -57,7 +55,7 @@ chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
   }
 
   if (message?.type === 'convert-and-download') {
-    convertAndDownload(message, sender.tab?.id)
+    convertForTab(message, sender.tab?.id)
       .then(sendResponse)
       .catch((err) => sendResponse({ ok: false, error: err?.message || String(err) }));
     return true;

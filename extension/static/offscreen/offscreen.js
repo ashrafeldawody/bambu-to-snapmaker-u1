@@ -1,5 +1,7 @@
 const worker = new Worker('/worker/py-worker.js', { type: 'module' });
 const pending = new Map();
+const outputs = new Map();
+const OUTPUT_TTL_MS = 5 * 60 * 1000;
 let nextId = 1;
 
 worker.onmessage = (event) => {
@@ -87,14 +89,26 @@ async function convertFromMakerWorld({ url, name, tabId }) {
     slot_map: {},
     insert_swap_pauses: suggestion.filaments.length > 4 && !suggestion.is_painted_model,
   }, source, fileName);
-  const blobUrl = URL.createObjectURL(new Blob([output], { type: 'application/octet-stream' }));
-  setTimeout(() => URL.revokeObjectURL(blobUrl), 120000);
+  const jobId = crypto.randomUUID();
+  const bytes = new Uint8Array(output);
+  outputs.set(jobId, bytes);
+  setTimeout(() => outputs.delete(jobId), OUTPUT_TTL_MS);
   return {
-    blobUrl,
+    jobId,
+    size: bytes.length,
     filename: result.download_name,
     profile: suggestion.display_name,
     warnings: collectWarnings(suggestion),
   };
+}
+
+function base64Chunk(bytes, offset, length) {
+  const slice = bytes.subarray(offset, Math.min(bytes.length, offset + length));
+  let binary = '';
+  for (let i = 0; i < slice.length; i += 0x8000) {
+    binary += String.fromCharCode.apply(null, slice.subarray(i, i + 0x8000));
+  }
+  return btoa(binary);
 }
 
 chrome.runtime.onMessage.addListener((message, _sender, sendResponse) => {
@@ -102,6 +116,19 @@ chrome.runtime.onMessage.addListener((message, _sender, sendResponse) => {
   if (message.type === 'warm') {
     invoke('profiles').then(() => sendResponse({ ok: true }), (err) => sendResponse({ ok: false, error: err.message }));
     return true;
+  }
+  if (message.type === 'chunk') {
+    const bytes = outputs.get(message.jobId);
+    if (!bytes) {
+      sendResponse({ ok: false, error: 'The converted file expired. Try again.' });
+    } else {
+      sendResponse({ ok: true, data: base64Chunk(bytes, message.offset, message.length) });
+    }
+    return false;
+  }
+  if (message.type === 'release') {
+    outputs.delete(message.jobId);
+    return false;
   }
   if (message.type === 'convert') {
     convertFromMakerWorld(message)
