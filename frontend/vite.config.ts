@@ -30,6 +30,20 @@ export default defineConfig(({ mode }) => {
   const env = loadEnv(mode, process.cwd(), '');
   const gaMeasurementId = env.VITE_GA_MEASUREMENT_ID || '';
 
+  if (mode === 'extension') {
+    return {
+      plugins: [svelte()],
+      base: '/app/',
+      publicDir: false,
+      build: {
+        outDir: '../extension/dist/app',
+        emptyOutDir: true,
+        sourcemap: false,
+        rollupOptions: { input: 'extension.html' },
+      },
+    };
+  }
+
   return {
     plugins: [svelte(), googleTagPlugin(gaMeasurementId)],
     server: {

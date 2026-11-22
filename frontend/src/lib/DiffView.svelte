@@ -1,6 +1,6 @@
 <script lang="ts">
   import type { DiffPayload } from './api';
-  import { downloadUrl } from './api';
+  import { downloadUrl, isExtension } from './api';
   import NozzleWarning from './NozzleWarning.svelte';
 
   interface Props {
@@ -281,7 +281,11 @@
     <a href={downloadUrl(jobId)} download={downloadName} class="download-btn large" onclick={ondownload}>
       Download {downloadName}
     </a>
-    <p class="subtle">File expires in ~5 minutes — download now or convert again.</p>
+    {#if isExtension}
+      <p class="subtle">Converted locally in your browser. The file stays available until you close this tab.</p>
+    {:else}
+      <p class="subtle">File expires in ~5 minutes — download now or convert again.</p>
+    {/if}
   </div>
 </div>
 

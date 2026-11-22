@@ -1,0 +1,14 @@
+{
+  "name": "u1-converter-extension",
+  "private": true,
+  "version": "1.0.0",
+  "type": "module",
+  "scripts": {
+    "build": "node build.mjs",
+    "package": "node build.mjs --zip",
+    "test": "node test/engine-smoke.mjs"
+  },
+  "devDependencies": {
+    "pyodide": "314.0.8"
+  }
+}

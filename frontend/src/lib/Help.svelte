@@ -1,4 +1,5 @@
 <script lang="ts">
+  import { isExtension } from './api';
   interface Props { onNavigate: (route: string) => void; }
   let { onNavigate }: Props = $props();
 </script>
@@ -143,7 +144,11 @@
       </details>
       <details>
         <summary>What happens to my uploaded files?</summary>
-        <p>Files are temporarily stored for processing and download. See the <a href="/privacy.html">Privacy Policy</a> for details.</p>
+        {#if isExtension}
+          <p>Nothing is uploaded. The browser extension converts files locally on your computer, and the converted file only exists in this tab until you download it.</p>
+        {:else}
+          <p>Files are temporarily stored for processing and download. See the <a href="/privacy.html">Privacy Policy</a> for details.</p>
+        {/if}
       </details>
       <details>
         <summary>What is the maximum file size?</summary>

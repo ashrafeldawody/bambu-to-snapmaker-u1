@@ -1,6 +1,10 @@
 // API client — thin wrapper around /api/* endpoints.
 // Everything returns Promises; callers handle errors.
 
+import { localEngine } from './localEngine';
+
+export const isExtension = import.meta.env.MODE === 'extension';
+
 export interface ProfileDescriptor {
   id: string;
   display_name: string;
@@ -75,6 +79,7 @@ async function handle<T>(response: Response): Promise<T> {
 }
 
 export async function listProfiles(): Promise<ProfileDescriptor[]> {
+  if (isExtension) return localEngine.invoke('profiles');
   return handle(await fetch('/api/profiles'));
 }
 
@@ -89,20 +94,24 @@ export interface FilamentInfo {
 export async function suggestProfile(
   file: File,
 ): Promise<{ profile_id: string; display_name: string; source_printer: string; source_nozzle_diameters: number[]; already_converted: boolean; filaments: FilamentInfo[]; is_painted_model: boolean; is_multiplate: boolean; is_oversized: boolean; is_colour_mixed: boolean; source_slicer: string | null; matched_on: Record<string, unknown> }> {
+  if (isExtension) return localEngine.invoke('suggest-profile', {}, file);
   const form = new FormData();
   form.append('file', file);
   return handle(await fetch('/api/suggest-profile', { method: 'POST', body: form }));
 }
 
 export async function listRules(): Promise<RuleSummary[]> {
+  if (isExtension) return localEngine.invoke('rules');
   return handle(await fetch('/api/rules'));
 }
 
 export async function getRuleYaml(name: string): Promise<{ name: string; yaml_text: string }> {
+  if (isExtension) return localEngine.invoke('rule', { name });
   return handle(await fetch(`/api/rules/${encodeURIComponent(name)}`));
 }
 
 export async function testMatch(file: File): Promise<unknown> {
+  if (isExtension) return localEngine.invoke('test-match', {}, file);
   const form = new FormData();
   form.append('file', file);
   return handle(
@@ -132,6 +141,17 @@ export interface ConvertOptions {
 }
 
 export async function convert(opts: ConvertOptions): Promise<ConvertResult> {
+  if (isExtension) {
+    return localEngine.invoke('convert', {
+      reference_profile: opts.reference_profile,
+      apply_rules: opts.apply_rules,
+      clamp_speeds: opts.clamp_speeds,
+      preserve_color_painting: opts.preserve_color_painting,
+      advanced_overrides: opts.advanced_overrides,
+      slot_map: opts.slot_map ?? {},
+      insert_swap_pauses: opts.insert_swap_pauses,
+    }, opts.file);
+  }
   const form = new FormData();
   form.append('file', opts.file);
   form.append('reference_profile', opts.reference_profile);
@@ -145,10 +165,18 @@ export async function convert(opts: ConvertOptions): Promise<ConvertResult> {
 }
 
 export async function listBambuPrinters(): Promise<Array<{id: string; name: string}>> {
+  if (isExtension) return localEngine.invoke('bambu-profiles');
   return handle(await fetch('/api/bambu-profiles'));
 }
 
 export async function convertBambu(opts: { file: File; reference_profile: string; clamp_speeds: boolean; insert_swap_pauses: boolean }): Promise<ConvertResult> {
+  if (isExtension) {
+    return localEngine.invoke('convert-bambu', {
+      reference_profile: opts.reference_profile,
+      clamp_speeds: opts.clamp_speeds,
+      insert_swap_pauses: opts.insert_swap_pauses,
+    }, opts.file);
+  }
   const form = new FormData();
   form.append('file', opts.file);
   form.append('reference_profile', opts.reference_profile);
@@ -158,5 +186,6 @@ export async function convertBambu(opts: { file: File; reference_profile: string
 }
 
 export function downloadUrl(jobId: string): string {
+  if (isExtension) return localEngine.downloadUrl(jobId);
   return `/api/download/${encodeURIComponent(jobId)}`;
 }

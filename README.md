@@ -20,6 +20,13 @@ before printing.
 | Bare geometry `.3mf` | No slicer settings are available, so the converter defaults to the bundled `0.20 Standard` U1 profile. |
 | Sliced `.gcode.3mf` without model geometry | Not supported. These files contain printer-specific plate G-code but no editable model data. Upload the original project `.3mf` instead. |
 
+## Chrome extension (this fork)
+
+This fork also ships as a Chrome extension. It adds a **Convert for
+Snapmaker U1** button to MakerWorld model pages and runs the whole converter
+offline in the browser, with no server or Docker needed. See
+[extension/README.md](extension/README.md) for build and install steps.
+
 ## Hosted Version
 
 **<https://u1convert.com>**

@@ -7,7 +7,9 @@
   import Feedback from './lib/Feedback.svelte';
   import RuleEditor from './lib/RuleEditor.svelte';
   import Help from './lib/Help.svelte';
-  import { listProfiles, suggestProfile, convert, type ProfileDescriptor, type ConvertResult } from './lib/api';
+  import { listProfiles, suggestProfile, convert, isExtension, type ProfileDescriptor, type ConvertResult } from './lib/api';
+  import { onEngineState } from './lib/localEngine';
+  import { readMakerWorldRequest, clearMakerWorldRequest, downloadMakerWorldFile, requestHostPermission, HostPermissionNeeded, type MakerWorldRequest } from './lib/makerworldImport';
   import ToolheadAssign from './lib/ToolheadAssign.svelte';
   import VoteBanner from './lib/VoteBanner.svelte';
   import VoteToast from './lib/VoteToast.svelte';
@@ -60,6 +62,55 @@
     } catch (e: unknown) {
       profilesError = e instanceof Error ? e.message : String(e);
     }
+  });
+
+  let engineState = $state<'starting' | 'ready' | 'failed'>(isExtension ? 'starting' : 'ready');
+  let engineDetail = $state('');
+
+  onMount(() => {
+    if (!isExtension) return;
+    return onEngineState((state, detail) => {
+      engineState = state;
+      engineDetail = detail ?? '';
+    });
+  });
+
+  let makerWorldRequest = $state<MakerWorldRequest | null>(null);
+  let makerWorldProgress = $state('');
+  let makerWorldError = $state('');
+  let makerWorldNeedsOrigin = $state('');
+
+  async function grantAndRetry() {
+    if (!makerWorldRequest || !makerWorldNeedsOrigin) return;
+    if (await requestHostPermission(makerWorldNeedsOrigin)) importFromMakerWorld(makerWorldRequest);
+  }
+
+  async function importFromMakerWorld(request: MakerWorldRequest) {
+    makerWorldRequest = request;
+    makerWorldError = '';
+    makerWorldNeedsOrigin = '';
+    makerWorldProgress = 'Downloading from MakerWorld…';
+    try {
+      const downloaded = await downloadMakerWorldFile(request, (received, total) => {
+        const mb = (received / 1048576).toFixed(1);
+        makerWorldProgress = total
+          ? `Downloading from MakerWorld… ${Math.round((received / total) * 100)}% (${mb} MB)`
+          : `Downloading from MakerWorld… ${mb} MB`;
+      });
+      makerWorldProgress = '';
+      clearMakerWorldRequest();
+      await onFile(downloaded);
+    } catch (e: unknown) {
+      makerWorldProgress = '';
+      makerWorldNeedsOrigin = e instanceof HostPermissionNeeded ? e.origin : '';
+      makerWorldError = e instanceof Error ? e.message : String(e);
+    }
+  }
+
+  onMount(() => {
+    if (!isExtension) return;
+    const request = readMakerWorldRequest();
+    if (request) importFromMakerWorld(request);
   });
 
   // ---- converter state machine --------------------------------------------
@@ -354,6 +405,37 @@
               disabled={phase === 'converting' || analysing}
             />
 
+            {#if isExtension && engineState === 'starting'}
+              <div class="status-toast" role="status" aria-live="polite">
+                <span class="spinner-sm" aria-hidden="true"></span>
+                Starting the offline converter engine…
+              </div>
+            {:else if isExtension && engineState === 'failed'}
+              <div class="error-banner" role="alert">
+                <strong>Converter engine failed to start:</strong> {engineDetail}
+              </div>
+            {/if}
+
+            {#if makerWorldProgress}
+              <div class="status-toast" role="status" aria-live="polite">
+                <span class="spinner-sm" aria-hidden="true"></span>
+                {makerWorldProgress}
+              </div>
+            {/if}
+
+            {#if makerWorldError && makerWorldRequest}
+              <div class="error-banner" role="alert">
+                <strong>Could not download the MakerWorld file:</strong> {makerWorldError}.
+                <a href={makerWorldRequest.url} download={makerWorldRequest.name}>Download it manually</a>
+                and drop it above.
+                {#if makerWorldNeedsOrigin}
+                  <button class="ghost" onclick={grantAndRetry}>Allow access and retry</button>
+                {:else}
+                  <button class="ghost" onclick={() => makerWorldRequest && importFromMakerWorld(makerWorldRequest)}>Retry</button>
+                {/if}
+              </div>
+            {/if}
+
             {#if analysing}
               <div class="status-toast" role="status" aria-live="polite">
                 <span class="spinner-sm" aria-hidden="true"></span>
@@ -488,8 +570,10 @@
       <span class="subtle">Snapmaker U1 3MF Converter</span>
       <span class="subtle">·</span>
       <a href="#help" onclick={() => navigate('help')}>Help</a>
-      <span class="subtle">·</span>
-      <a href="/privacy.html">Privacy</a>
+      {#if !isExtension}
+        <span class="subtle">·</span>
+        <a href="/privacy.html">Privacy</a>
+      {/if}
     </div>
     <div class="footer-links">
       <span class="subtle">Also by the author:</span>
@@ -524,7 +608,9 @@
   </footer>
 </div>
 
-<Feedback currentPage={route} />
+{#if !isExtension}
+  <Feedback currentPage={route} />
+{/if}
 
 {#if showVoteToast}
   <VoteToast onclose={() => (showVoteToast = false)} />
